@@ -8,7 +8,7 @@ from scipy.integrate import odeint, trapezoid
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 results_path = os.path.join(base_dir, 'data', 'tpi_results', 'lebron_tpi_results.csv')
 raw_data_path = os.path.join(base_dir, 'data', 'prod_score', 'lebron_data', 'lebron_tpi_metrics_final.csv')
-graphs_dir = os.path.join(base_dir, 'graphs')
+graphs_dir = os.path.join(base_dir, 'data', 'tpi_results', 'graphs')
 os.makedirs(graphs_dir, exist_ok=True)
 
 # 1. Plot Career Metrics (Normalized)
