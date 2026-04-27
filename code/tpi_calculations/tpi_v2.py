@@ -86,7 +86,7 @@ def calculate_team_capability(c_srs, p_srs):
 # team-level SRS-equivalent impact. ~0.45 per Engelmann et al.
 BPM_SCALE = 0.45
 
-def calculate_resistance_final(row, rs_pace_lkp, po_pace_lkp, team_srs_df, opp_srs_df, opp_penalty=0, help_penalty=0):
+def calculate_resistance_final(row, rs_pace_lkp, po_pace_lkp, team_srs_df, opp_srs_df, df_teammate_inj, df_opp_inj):
     year = int(row['Year'])
     # Pace factors: normalize each SRS value to a 100-possession baseline.
     rs_f  = 100.0 / rs_pace_lkp.get(year,     100.0)
