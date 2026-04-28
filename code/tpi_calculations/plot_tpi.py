@@ -3,123 +3,207 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import odeint
+from datetime import datetime, timedelta
 
 # Path configuration
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 results_path = os.path.join(base_dir, 'data', 'tpi_results', 'lebron_tpi_results.csv')
+minutes_path = os.path.join(base_dir, 'data', 'fatigue_metric', "lebron's_playoff_minutes_full_career.csv")
 graphs_dir = os.path.join(base_dir, 'data', 'tpi_results', 'graphs')
+rs_dates_path = os.path.join(base_dir, 'data', 'fatigue_metric', 'lebron_reg_season_game_dates.csv')
+pbp_path = os.path.join(base_dir, 'data', 'fatigue_metric', 'lebron_pbp_usg_components.csv')
 os.makedirs(graphs_dir, exist_ok=True)
 
-# Fatigue Constants (from tpi_career_fatigue.py)
-ALPHA_ON, BETA_ON, GAMMA_BENCH, R_CONST = 0.04, 0.08, 0.008, 0.01
+# Constants - BIOLOGICAL DIFFERENTIATION
+ALPHA_ON = 0.048 
+BETA_TIMEOUT = 0.018 # Per minute
+BETA_REST_DAY = 0.15 # Per day
+BETA_PLAYING = 0.001 # Per minute
 
-def model_on(f, t, usg): 
-    intensity = pow(usg / 25.0, 2.0)
-    return ALPHA_ON * intensity - BETA_ON * f
-def model_off(f, t): return -GAMMA_BENCH * f
-
-# Load data
-df = pd.read_csv(results_path)
-df = df.dropna(subset=['Total_TPI'])
-
-# Set aesthetic style
 plt.style.use('dark_background')
-accent_color = '#e74c3c' # LeBron Red
-secondary_color = '#f1c40f' # Laker Gold
-tpi_color = '#00ccff' # Bright Cyan
-bg_color = '#0f0f0f'
+color_on, color_off, color_rest, bg_color = '#ff4d4d', '#2ecc71', '#3498db', '#0a0a0a'
 
-# 1. Component Breakdown (Brighter & Thicker)
-df_norm = df.copy()
-for col in ['Prod_Score', 'Res_Score', 'Fatigue_Avg', 'TPI_per_G']:
-    df_norm[col] = df_norm[col] / df_norm[col].mean()
-
-plt.figure(figsize=(14, 7), facecolor=bg_color)
-ax = plt.gca()
-ax.set_facecolor(bg_color)
-
-# Brighter, thicker component lines
-plt.plot(df_norm['Year'], df_norm['Prod_Score'], label='Production', color='#2ecc71', linewidth=2.5, marker='.', alpha=0.9)
-plt.plot(df_norm['Year'], df_norm['Res_Score'], label='Resistance', color='#9b59b6', linewidth=2.5, marker='.', alpha=0.9)
-plt.plot(df_norm['Year'], df_norm['Fatigue_Avg'], label='Fatigue', color='#e67e22', linewidth=2.5, marker='.', alpha=0.9)
-
-# TPI per Game (Slightly thicker than components)
-plt.plot(df_norm['Year'], df_norm['TPI_per_G'], label='TOTAL TPI PER GAME', color=tpi_color, linewidth=4.0, marker='H', markersize=10, zorder=10)
-
-plt.axhline(1.0, color='white', linestyle=':', alpha=0.3)
-plt.title('LeBron James: TPI Component Breakdown (Normalized)', fontsize=16, fontweight='bold', pad=15)
-plt.legend(loc='upper left', frameon=True, facecolor=bg_color)
-plt.xticks(df['Year'])
-plt.grid(alpha=0.1)
-plt.tight_layout()
-plt.savefig(os.path.join(graphs_dir, 'tpi_component_drivers.png'), dpi=300)
-plt.close()
-
-# 2. Fatigue Explainer: 2018 Finals Deep Dive
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), facecolor=bg_color)
-ax1.set_facecolor(bg_color)
-ax2.set_facecolor(bg_color)
-
-# --- Subplot 1: Game 1 (48 mins ON) ---
-usg_g1 = 35.0
-f_vals_g1 = [0.45] # Start with some existing fatigue
-t_game = np.linspace(0, 53, 530) # 48 mins + OT
-for i in range(len(t_game)-1):
-    dt = t_game[i+1] - t_game[i]
-    df_delta = model_on(f_vals_g1[i], t_game[i], usg_g1)
-    f_vals_g1.append(f_vals_g1[i] + df_delta * dt)
-
-ax1.plot(t_game, f_vals_g1, color='#e67e22', linewidth=3)
-ax1.fill_between(t_game, f_vals_g1, color='#e67e22', alpha=0.2)
-ax1.set_title('2018 Finals Game 1: Intra-Game Micro-Fatigue (48 Mins ON)', fontsize=14, fontweight='bold')
-ax1.set_xlabel('Minutes (Game Clock)', alpha=0.7)
-ax1.set_ylabel('Fatigue (Af)', alpha=0.7)
-ax1.grid(alpha=0.1)
-ax1.annotate('Maximum Intensity Load', xy=(48, f_vals_g1[-1]), xytext=(30, 0.65),
-             arrowprops=dict(facecolor='white', shrink=0.05, width=1, headwidth=5))
-
-# --- Subplot 2: 2018 Finals Series (4 Games) ---
-# Simulating 4 games with 2 days rest between
-t_series = np.linspace(0, 10, 1000) # 10 days
-f_series = [0.45]
-game_days = [0, 2.1, 5, 7.1]
-for i in range(len(t_series)-1):
-    dt = t_series[i+1] - t_series[i]
-    is_game = False
-    for gd in game_days:
-        if gd <= t_series[i] < gd + (48/1440.0): # 48 mins game
-            is_game = True
-            break
-    
-    if is_game:
-        dfdt = model_on(f_series[i], t_series[i], usg_g1) * 1440.0 # Scale to days
+def simulate_segment_plot(f_start, mode, duration, usg, t_offset):
+    if duration <= 0: return f_start, [], [], mode
+    num_steps = max(15, int(duration * 2))
+    t_span = np.linspace(0, duration, num_steps)
+    if mode == 'ON':
+        f_vals = odeint(lambda f, t: ALPHA_ON * pow(usg/25,2) - BETA_PLAYING*f, f_start, t_span)
     else:
-        dfdt = -R_CONST * f_series[i]
+        f_vals = odeint(lambda f, t: -BETA_TIMEOUT*f, f_start, t_span)
+    t_global = t_offset + t_span/1440.0
+    return f_vals[-1][0], t_global.tolist(), f_vals.flatten().tolist(), mode
+
+def parse_stretch(s):
+    if pd.isna(s) or s == '-': return None
+    try:
+        m, t = s.split(': '); start, end = map(int, t.split('~'))
+        return m, start, end
+    except: return None
+
+def simulate_game_plot(f_start, stretches, usg_map, to_map, t_day_start):
+    f_curr, wall_min, segments = f_start, 0.0, []
+    p_data = {}
+    for i, s in enumerate(stretches):
+        d = parse_stretch(s)
+        if not d: continue
+        p = {0:1,1:2,2:2,3:3,4:4,5:4,6:5,7:6}.get(i, 4)
+        p_data.setdefault(p, []).append(d)
     
-    f_series.append(f_series[i] + dfdt * dt)
+    if not p_data: return f_start, [], []
+    for p in range(1, max(p_data.keys())+1):
+        if p > 1:
+            b_dur = 15.0 if p==3 else (5.0 if p>4 else 2.5)
+            f_curr, ts, fs, m = simulate_segment_plot(f_curr, 'OFF', b_dur, 0, t_day_start + wall_min/1440.0)
+            segments.append({'t':ts, 'f':fs, 'm':m}); wall_min += b_dur
+        for (mode, start, end) in sorted(p_data.get(p, []), key=lambda x: x[1]):
+            curr_c = start
+            for to in sorted([t/60.0 for t in to_map.get(p, [])]):
+                if curr_c < to < end:
+                    dur = to - curr_c
+                    f_curr, ts, fs, m = simulate_segment_plot(f_curr, mode, dur, usg_map.get(p, 30), t_day_start + wall_min/1440.0)
+                    segments.append({'t':ts, 'f':fs, 'm':m}); wall_min += dur
+                    f_curr, ts, fs, m = simulate_segment_plot(f_curr, 'OFF', 3.0, 0, t_day_start + wall_min/1440.0)
+                    segments.append({'t':ts, 'f':fs, 'm':m}); wall_min += 3.0
+                    curr_c = to
+            dur = end - curr_c
+            if dur > 0:
+                f_curr, ts, fs, m = simulate_segment_plot(f_curr, mode, dur, usg_map.get(p, 30), t_day_start + wall_min/1440.0)
+                segments.append({'t':ts, 'f':fs, 'm':m}); wall_min += dur
+    return f_curr, segments
 
-ax2.plot(t_series, f_series, color='#e74c3c', linewidth=3)
-ax2.fill_between(t_series, f_series, color='#e74c3c', alpha=0.2)
-ax2.set_title('2018 Finals: Series Macro-Fatigue Accumulation', fontsize=14, fontweight='bold')
-ax2.set_xlabel('Days in Series', alpha=0.7)
-ax2.set_ylabel('Fatigue (Af)', alpha=0.7)
-for gd in game_days: ax2.axvline(gd, color='white', alpha=0.2, linestyle='--')
-ax2.grid(alpha=0.1)
+def parse_rs_dates():
+    rs_map = {}
+    if not os.path.exists(rs_dates_path): return {}
+    with open(rs_dates_path, 'r', encoding='utf-8') as f: lines = f.readlines()
+    for line in lines[1:]:
+        parts = line.strip().split(',')
+        if not parts: continue
+        year_str = parts[0]
+        start_y = int(year_str.split('-')[0]); end_y = 2000 + int(year_str.split('-')[1]) if '-' in year_str else start_y
+        dates = []
+        for val in parts[1:]:
+            if not val or '/' not in val: continue
+            try:
+                mm, dd = map(int, val.split('/'))
+                dates.append(datetime(start_y if mm >= 10 else end_y, mm, dd))
+            except: continue
+        rs_map[str(end_y)] = sorted(dates)
+    return rs_map
 
-plt.tight_layout(pad=3.0)
-plt.savefig(os.path.join(graphs_dir, 'fatigue_engine_mechanics.png'), dpi=300)
-plt.close()
+# Data Loading
+df_min = pd.read_csv(minutes_path)
+df_pbp = pd.read_csv(pbp_path)
+df_pbp['TO'] = df_pbp['Timeouts'].apply(lambda x: [float(t) for t in str(x).split(',')] if pd.notna(x) and str(x)!="" else [])
+df_pbp['USG_C'] = 100 * ((df_pbp['L_FGA'] + 0.44*df_pbp['L_FTA'] + df_pbp['L_TOV']) / (df_pbp['T_FGA'] + 0.44*df_pbp['T_FTA'] + df_pbp['T_TOV']).replace(0,1))
+pbp_2018 = {idx: (g.set_index('Period')['USG_C'].to_dict(), g.set_index('Period')['TO'].to_dict()) 
+            for idx, (gid, g) in enumerate(df_pbp[df_pbp['Year']==2018].groupby('Game_ID'))}
+rs_game_map = parse_rs_dates()
 
-# 3. Career Profile
-fig3, ax3_1 = plt.subplots(figsize=(14, 8), facecolor=bg_color)
-ax3_1.set_facecolor(bg_color)
-ax3_1.bar(df['Year'], df['Total_TPI'], color=accent_color, alpha=0.5, label='Total TPI')
-ax3_2 = ax3_1.twinx()
-ax3_2.plot(df['Year'], df['TPI_per_G'], color=secondary_color, marker='o', linewidth=3, label='TPI per G')
-ax3_1.set_title('LeBron James: TPI Career Profile', fontsize=18, fontweight='bold')
-ax3_1.set_xticks(df['Year'])
-plt.tight_layout()
-plt.savefig(os.path.join(graphs_dir, 'lebron_career_tpi_profile.png'), dpi=300)
-plt.close()
+def simulate_2018_full():
+    rs_games = rs_game_map.get('2018', [])
+    po_data = df_min[df_min['Year']==2018]
+    t0 = rs_games[0]
+    f_accum, segs_rs, segs_po, po_info = 0.0, [], [], []
+    # RS
+    last_d = t0
+    for g_d in rs_games:
+        gap = (g_d - last_d).total_seconds() / 86400.0
+        if gap > 0:
+            tr = np.linspace(0, gap, 8); fs = f_accum * np.exp(-BETA_REST_DAY * tr)
+            segs_rs.append({'t': [((last_d-t0).total_seconds()+x*86400)/86400 for x in tr], 'f': fs.tolist(), 'm': 'REST'})
+            f_accum = fs[-1]
+        t_off = (g_d - t0).total_seconds() / 86400.0
+        f_accum, segs = simulate_game_plot(f_accum, ["ON: 0~10","OFF: 0~3","ON: 3~10","ON: 0~9","OFF: 0~3","ON: 3~9"], {1:30,2:30,3:30,4:30}, {}, t_off)
+        segs_rs.extend(segs); f_accum = segs[-1]['f'][-1]; last_d = g_d
+    
+    po_start_date = datetime(2018, 4, 15)
+    t_po_start = (po_start_date-t0).total_seconds()/86400.0
+    gap_po = (po_start_date - last_d).total_seconds() / 86400.0
+    if gap_po > 0:
+        tr = np.linspace(0, gap_po, 10); fs = f_accum * np.exp(-BETA_REST_DAY * tr)
+        segs_po.append({'t': [(last_d-t0).total_seconds()/86400+x for x in tr], 'f': fs.tolist(), 'm': 'REST'})
+        f_accum = fs[-1]
+    
+    days_el = t_po_start
+    for idx, (i, row) in enumerate(po_data.iterrows()):
+        if idx > 0:
+            tr = np.linspace(0, 2.0, 20); fs = f_accum * np.exp(-BETA_REST_DAY * tr)
+            segs_po.append({'t': [days_el + x for x in tr], 'f': fs.tolist(), 'm': 'REST'})
+            f_accum = fs[-1]; days_el += 2.0
+        g_start_idx = len(segs_po)
+        usg, to = pbp_2018.get(idx, ({1:35,2:35,3:35,4:35}, {}))
+        f_accum, segs = simulate_game_plot(f_accum, [row[f'Stretch {k}'] for k in range(1, 8)], usg, to, days_el)
+        segs_po.extend(segs); f_accum = segs_po[-1]['f'][-1]; days_el = segs_po[-1]['t'][-1]
+        po_info.append({'start': g_start_idx, 'end': len(segs_po), 'round': row['Rnd']})
+    return segs_rs, segs_po, po_info, t_po_start
 
-print(f"Refined visuals saved to {graphs_dir}")
+segs_rs, segs_po, po_info, t_po_start = simulate_2018_full()
+
+fig, axes = plt.subplots(5, 1, figsize=(20, 65), facecolor=bg_color)
+for ax in axes: ax.set_facecolor(bg_color); ax.grid(alpha=0.03)
+
+# LEVEL 1: Intra-Game
+g1 = [g for g in po_info if g['round'] == 'F'][0]
+g1_segs = segs_po[g1['start']:g1['end']]
+t0_g = g1_segs[0]['t'][0]
+for s in g1_segs:
+    axes[0].plot((np.array(s['t'])-t0_g)*1440, s['f'], color=(color_on if s['m']=='ON' else color_off), linewidth=5, solid_capstyle='round')
+axes[0].set_title('LEVEL 1: Intra-Game Mechanics (Finals G1)', fontsize=24, fontweight='bold', pad=25)
+
+# LEVEL 2: Series (Snake Zoom 30x)
+f_meta = [g for g in po_info if g['round'] == 'F']
+s_segs = segs_po[f_meta[0]['start']-1:f_meta[-1]['end']]
+current_x = 0
+for s in s_segs:
+    dt = np.array(s['t']) - s['t'][0]
+    is_game = s['m'] in ['ON', 'OFF']
+    x_v = current_x + (dt * 30.0 if is_game else dt)
+    if is_game: axes[1].axvspan(x_v[0], x_v[-1], color='white', alpha=0.1, linewidth=0)
+    axes[1].plot(x_v, s['f'], color=(color_on if s['m']=='ON' else (color_off if s['m']=='OFF' else color_rest)), linewidth=3, solid_capstyle='round')
+    current_x = x_v[-1]
+axes[1].set_title('LEVEL 2: Series Fatigue [Snake Zoom 30x]', fontsize=24, fontweight='bold', pad=25)
+axes[1].set_xticks([])
+
+# LEVEL 3: Postseason (Snake Zoom 30x)
+current_x = 0
+for s in segs_po:
+    dt = np.array(s['t']) - s['t'][0]
+    is_game = s['m'] in ['ON', 'OFF']
+    x_v = current_x + (dt * 30.0 if is_game else dt)
+    if is_game: axes[2].axvspan(x_v[0], x_v[-1], color='white', alpha=0.1, linewidth=0)
+    axes[2].plot(x_v, s['f'], color=(color_on if is_game else color_rest), linewidth=2, solid_capstyle='round')
+    current_x = x_v[-1]
+axes[2].set_title('LEVEL 3: Full Postseason [Snake Zoom 30x]', fontsize=24, fontweight='bold', pad=25)
+axes[2].set_xticks([])
+
+# LEVEL 4: Regular Season
+for s in segs_rs:
+    c = (color_on if s['m'] in ['ON','OFF'] else color_rest)
+    axes[3].plot(s['t'], s['f'], color=c, linewidth=1.5, alpha=0.8)
+axes[3].set_title('LEVEL 4: Regular Season Profile (Actual Game Dates)', fontsize=24, fontweight='bold', pad=25)
+
+# LEVEL 5: OVERALL SEASON (RS + PO) [Snake Zoom 15x]
+all_segs = segs_rs + segs_po
+current_x = 0
+for s in all_segs:
+    dt = np.array(s['t']) - s['t'][0]
+    is_game = s['m'] in ['ON', 'OFF']
+    x_v = current_x + (dt * 15.0 if is_game else dt) # 15x stretch for the whole season
+    if is_game: axes[4].axvspan(x_v[0], x_v[-1], color='white', alpha=0.08, linewidth=0)
+    axes[4].plot(x_v, s['f'], color=(color_on if is_game else color_rest), linewidth=1, alpha=0.7)
+    current_x = x_v[-1]
+# Mark Playoff Start in Snake Coordinates
+# Need to find the exact current_x at the bridge
+# Let's just draw a vertical line where segs_rs ends
+rs_end_x = 0
+for s in segs_rs:
+    dt = np.array(s['t']) - s['t'][0]
+    rs_end_x += (dt * 15.0 if s['m'] in ['ON','OFF'] else dt)[-1]
+axes[4].axvline(rs_end_x, color='white', linestyle='--', alpha=0.6)
+axes[4].text(rs_end_x, -0.05, 'PLAYOFFS START', color='white', fontweight='bold', ha='center', va='top', transform=axes[4].get_xaxis_transform())
+axes[4].set_title('LEVEL 5: Overall Season Fatigue (RS + PO) [Snake Zoom 15x]', fontsize=24, fontweight='bold', pad=25)
+axes[4].set_xticks([]); axes[4].set_ylim(0, max([v for s in all_segs for v in s['f']])*1.25)
+
+plt.tight_layout(pad=16.0); plt.savefig(os.path.join(graphs_dir, 'fatigue_engine_mechanics.png'), dpi=300); plt.close()
+print("Final 5-level high-fidelity visuals with full season context saved.")
