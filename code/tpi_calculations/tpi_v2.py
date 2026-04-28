@@ -117,31 +117,9 @@ def calculate_resistance_final(row, rs_pace_lkp, po_pace_lkp, team_srs_df, opp_s
         return 0.0001
 
 # --- 4. FATIGUE ENGINE (ODE) ---
-R_BASE, ETA, LMBDA, BETA, ZETA, PHI = 0.33, 0.15, 0.12, 0.02, 0.05, 1.05
 
-def fatigue_derivative(Af, t, r_eff):
-    recovery_rate = r_eff * (1 + ETA * Af) * np.exp(-LMBDA * Af)
-    return -Af * recovery_rate
 
-def get_avg_fatigue(row):
-    days = [float(x) for x in str(row['Schedule_Days']).split(',')]
-    shifts = [float(x) for x in str(row['TZ_Shifts']).split(',')]
-    current_af = (pow(row['RS_MPG'] / 36, 1.4) * (row['RS_USG'] / 25)) * (row['Games_Played'] / 82)
-    total_area = 0
 
-    for i in range(len(days)):
-        work_base = pow(row['MPG'] / 36, 1.4) * (row['USG'] / 25)
-        impulse = (work_base * PHI) * np.exp(BETA * current_af)
-        current_af += impulse
-        
-        if i < len(days) - 1:
-            t_span = np.linspace(days[i], days[i+1], 50)
-            r_eff = R_BASE * pow(1 - ZETA, abs(shifts[i]))
-            decay_path = odeint(fatigue_derivative, current_af, t_span, args=(r_eff,))
-            total_area += trapezoid(decay_path.flatten(), t_span)
-            current_af = decay_path[-1][0]
-            
-    return total_area / len(days)
 
 # --- 5. MAIN EXECUTION ---
 def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, opp_srs_path):
@@ -155,6 +133,11 @@ def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, op
     rs_pace_lkp = dict(zip(df['Year'].astype(int), df['RS_Pace']))
     po_pace_lkp = dict(zip(df['Year'].astype(int), df['PO_Pace']))
 
+    # Load the new micro-fatigue results
+    micro_fatigue_path = os.path.join(base_dir, 'data', 'fatigue_metric', 'lebron_career_fatigue_results.csv')
+    df_fatigue = pd.read_csv(micro_fatigue_path)
+    fatigue_lkp = dict(zip(df_fatigue['Year'].astype(int), df_fatigue['Fatigue_Avg']))
+
     results = []
 
     for _, row in df.iterrows():
@@ -167,7 +150,11 @@ def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, op
             row, rs_pace_lkp, po_pace_lkp, df_team_srs, df_opp_srs,
             df_teammate_inj, df_opp_inj
         )
-        fatigue_avg = get_avg_fatigue(row)
+        
+        year = int(row['Year'])
+        # Use micro-fatigue value from our PBP reconstruction
+        fatigue_avg = fatigue_lkp.get(year, 0.5) # Default 0.5 if missing
+        
         gp = get_total_playoff_games(row['Schedule_Days'])
         
         tpi_per_g = (prod * res) * fatigue_avg

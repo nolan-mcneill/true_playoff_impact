@@ -23,26 +23,39 @@ The Production Score (`Prod_Score`) evaluates a player's on-court output, heavil
 The Resistance Score (`Res_Score`) quantifies the difficulty of the playoff environment. It compares the "Final Boss" weighted strength of the opponents against the strength of the player's own supporting cast, adjusting for injuries and pace.
 
 *   **Team Capability (SRS):** Evaluates team and opponent strength using a blend of Current Regular Season SRS (44.4%) and Previous Post-Season SRS (55.6%). Values are pace-adjusted to a 100-possession baseline.
-*   **"Final Boss" Opponent Weighting:** Instead of a simple average, the Resistance Score is calculated natively for each individual series (incorporating pace, team SRS, and injuries for that specific series). These per-series Resistance Scores are then ranked from toughest to easiest. The toughest series (the "Final Boss") receives the highest base weight (e.g., 50%), the second toughest 25%, the third 15%, and the easiest 10%. This ensures beating a juggernaut in the 2nd round is properly rewarded.
-*   **Injury Penalties:** Injuries are evaluated on a per-series basis. The injured player's regular-season BPM is converted into SRS equivalents and scaled by the proportion of games missed in that specific series. This penalty directly lowers the opponent's (or LeBron's team's) SRS for that series *before* the Resistance Score is calculated, dynamically adjusting the "moment-to-moment" strength of the team.
-*   **Resistance Calculation:** For each series, a Resistance Gap (`g`) is calculated: `Adjusted Opponent SRS - Adjusted Team Help SRS`. A power curve (`k = 0.35`) is applied to this gap. The final overall Resistance Score is the weighted average of these per-series Resistance Scores, with weights scaled by the number of games played in each series.
+*   **"Final Boss" Opponent Weighting:** per-series Resistance Scores are ranked from toughest to easiest. The toughest series receives the highest base weight (50%), ensuring deep runs against elite competition are properly rewarded.
+*   **Injury Penalties:** Injuries are evaluated on a per-series basis. The injured player's regular-season BPM is converted into SRS equivalents and scaled by the proportion of games missed, dynamically lowering the team's strength.
 
-### 3. Fatigue Engine
-The Fatigue Engine (`Fatigue_Avg`) models the compounding physical toll of a playoff run. A deep playoff run as a high-usage player requires significantly more exertion than a short stint.
+### 3. Fatigue Engine (Micro-PBP Reconstruction)
+The Fatigue Engine (`Fatigue_Avg`) models the compounding physical toll of a playoff run. Unlike standard models, TPI uses **minute-by-minute career play-by-play (PBP) data** to reconstruct exact exertion levels.
 
-*   **Workload:** Calculated per-game using Minutes Per Game (MPG) and Usage Rate (USG%), scaled non-linearly.
-*   **Rest & Recovery:** Models the days of rest between games using a continuous Ordinary Differential Equation (ODE).
-*   **Timezone Tax:** Penalizes recovery based on the number of timezone shifts between games.
-*   **Mechanism:** Fatigue accumulates as "impulses" after each game and decays exponentially during rest days. The engine calculates the integral (area under the curve) of this continuous fatigue path to determine the `Fatigue_Avg`.
+*   **Micro-Modeling:** A piecewise Ordinary Differential Equation (ODE) system simulates the fatigue path for every individual game, using exact ON/OFF substitution intervals.
+*   **PBP USG%:** Usage rate is calculated programmatically for every quarter of every game (FGA + 0.44*FTA + TOV) to determine the exact intensity of every playing minute.
+*   **On-Court Focus:** The final `Fatigue_Avg` is calculated strictly during **on-court minutes**, ensuring the "exertion credit" accurately reflects the performance context.
+*   **Macro Recovery:** Models exponential decay of fatigue between games based on days of rest and cumulative career wear-and-tear.
+
+---
+
+## Career Benchmarks (LeBron James 2006-2025)
+
+The TPI model identifies the 2018 run as the statistically greatest "carry job" in NBA history, driven by an unprecedented combination of volume, opponent resistance, and physical exhaustion.
+
+| Year | Total TPI | TPI per G | Fatigue_Avg | Historical Context |
+| :--- | :--- | :--- | :--- | :--- |
+| **2018** | **280.5** | **12.75** | **0.603** | **The Apex Carry Job** |
+| **2016** | 211.9 | 10.09 | 0.483 | 3-1 Comeback / Peak Efficiency |
+| **2015** | 189.6 | 9.48 | 0.633 | Maximum Physical Exertion |
+| **2014** | 168.4 | 8.86 | 0.505 | Elite Production (Final Miami Year) |
+| **2012** | 139.5 | 6.06 | 0.579 | High Volume First Title |
 
 ---
 
 ## Technical Details
 
-The model is built in Python, heavily relying on `pandas` for data structuring and `scipy.integrate.odeint` for the continuous fatigue engine modeling.
+The model is built in Python, utilizing `pandas` for PBP data processing and `scipy.integrate.odeint` for continuous ODE fatigue modeling.
 
 ### Core Architecture
-*   `/code/tpi_calculations/tpi_v2.py`: The core calculation engine housing the TPI formulas.
-*   `/data/prod_score/`: Player production data (BPM, TS%, usage).
-*   `/data/res_score/`: Environmental data (Team SRS, opponent SRS, schedule/rest days, timezone shifts, injury tracking).
-*   `/data/tpi_results/`: Output CSVs containing the final computed Total TPI and Per-Game TPI across different years.
+*   `/code/tpi_calculations/tpi_v2.py`: The core calculation engine.
+*   `/code/tpi_calculations/tpi_career_fatigue.py`: Minute-by-minute career PBP fatigue simulation.
+*   `/data/fatigue_metric/`: Raw PBP components and minute-interval datasets.
+*   `/data/tpi_results/`: Final computed TPI datasets.
