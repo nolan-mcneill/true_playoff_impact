@@ -12,7 +12,8 @@ GAMMA_BENCH = 0.008
 R_CONST = 0.01
 
 def model_on(f, t, usg):
-    intensity = usg / 25.0
+    # Non-linear intensity: Exertion grows exponentially as USG% moves away from average (25%)
+    intensity = pow(usg / 25.0, 2.0)
     dfdt = ALPHA_ON * intensity - BETA_ON * f
     return dfdt
 

@@ -21,6 +21,8 @@ def calculate_adj_bpm(bpm, ts_player, ts_league):
 # SRS only: schedule-adjusted, single consistent unit (pts/game margin).
 # Net Rating dropped to avoid mixing per-100-possession and per-game units.
 def calculate_team_capability(c_srs, p_srs):
+    if p_srs == 0:
+        return c_srs
     current = c_srs
     legacy = p_srs
     return (current * 0.444) + (legacy * 0.556)
