@@ -118,10 +118,6 @@ def calculate_resistance_final(row, rs_pace_lkp, po_pace_lkp, team_srs_df, opp_s
     else:
         return 0.0001
 
-# --- 4. FATIGUE ENGINE (ODE) ---
-
-
-
 
 # --- 5. MAIN EXECUTION ---
 def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, opp_srs_path):
@@ -135,8 +131,8 @@ def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, op
     rs_pace_lkp = dict(zip(df['Year'].astype(int), df['RS_Pace']))
     po_pace_lkp = dict(zip(df['Year'].astype(int), df['PO_Pace']))
 
-    # Load the new micro-fatigue results
-    micro_fatigue_path = os.path.join(base_dir, 'data', 'fatigue_metric', 'lebron_career_fatigue_results.csv')
+    # Load the new bio-fatigue results (Production_Multiplier from 6-metric ODE system)
+    micro_fatigue_path = os.path.join(base_dir, 'data', 'results', 'lebron_career_fatigue_results.csv')
     df_fatigue = pd.read_csv(micro_fatigue_path)
     fatigue_lkp = dict(zip(df_fatigue['Year'].astype(int), df_fatigue['Fatigue_Avg']))
 
@@ -155,16 +151,16 @@ def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, op
         
         year = int(row['Year'])
         # Use micro-fatigue value from our PBP reconstruction
-        fatigue_avg = fatigue_lkp.get(year, 0.5) # Default 0.5 if missing
+        fatigue_avg = fatigue_lkp.get(year, {})  # Default 1.0 (no penalty) if missing (Production_Multiplier from bio ODE)
         
         gp = get_total_playoff_games(row['Schedule_Days'])
-        
-        tpi_per_g = (prod * res) * fatigue_avg
+        prod_multiplier = 1/fatigue_avg
+        tpi_per_g = (prod * res) * prod_multiplier
         total_tpi = tpi_per_g * gp
         
-        results.append([total_tpi, tpi_per_g, prod, res, fatigue_avg, gp])
+        results.append([total_tpi, tpi_per_g, prod, res, fatigue_avg,prod_multiplier, gp])
         
-    cols = ['Total_TPI', 'TPI_per_G', 'Prod_Score', 'Res_Score', 'Fatigue_Avg', 'GP']
+    cols = ['Total_TPI', 'TPI_per_G', 'Prod_Score', 'Res_Score', 'Fatigue_Avg', 'Prod_Multiplier', 'GP']
     res_df = pd.DataFrame(results, columns=cols)
     final = pd.concat([df['Year'], res_df], axis=1)
     
@@ -173,20 +169,20 @@ def run_tpi_analysis(df_path, teammate_inj_path, opp_inj_path, team_srs_path, op
 
 # --- RUN AND PRINT ---
 import os
-base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 final_output = run_tpi_analysis(
-    os.path.join(base_dir, 'data', 'prod_score', 'lebron_data', 'lebron_tpi_metrics_final.csv'),
-    os.path.join(base_dir, 'data', 'res_score', 'playoff_injury_data', 'lebron_teammate_injury_data.csv'),
-    os.path.join(base_dir, 'data', 'res_score', 'playoff_injury_data', 'lebron_opponent_injury_data.csv'),
-    os.path.join(base_dir, 'data', 'res_score', 'team_capability_data', 'lebron_team_srs_data.csv'),
-    os.path.join(base_dir, 'data', 'res_score', 'team_capability_data', 'lebron_opponent_srs_data.csv'),
+    os.path.join(base_dir, 'data', 'raw', 'lebron_tpi_metrics_final.csv'),
+    os.path.join(base_dir, 'data', 'raw', 'playoff_injury_data', 'lebron_teammate_injury_data.csv'),
+    os.path.join(base_dir, 'data', 'raw', 'playoff_injury_data', 'lebron_opponent_injury_data.csv'),
+    os.path.join(base_dir, 'data', 'raw', 'team_capability_data', 'lebron_team_srs_data.csv'),
+    os.path.join(base_dir, 'data', 'raw', 'team_capability_data', 'lebron_opponent_srs_data.csv'),
 )
 
-results_dir = os.path.join(base_dir, 'data', 'tpi_results')
+results_dir = os.path.join(base_dir, 'data', 'results')
 os.makedirs(results_dir, exist_ok=True)
 results_path = os.path.join(results_dir, 'lebron_tpi_results.csv')
-output_cols = ['Year', 'Total_TPI', 'TPI_per_G', 'Prod_Score', 'Res_Score', 'Fatigue_Avg', 'GP']
+output_cols = ['Year', 'Total_TPI', 'TPI_per_G', 'Prod_Score', 'Res_Score', 'Fatigue_Avg', 'Prod_Multiplier', 'GP']
 final_output[output_cols].to_csv(results_path, index=False)
 
 print(f"\n--- LEBRON JAMES TPI CAREER ANALYSIS SAVED TO {results_path} ---")

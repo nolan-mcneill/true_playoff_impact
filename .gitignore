@@ -1,3 +1,22 @@
-Antigravity.exe
-.agents/rules/agent-work-delegation.md
-brain \ 32b8f602-3481-458e-826c-b727ffdbe4c3\scratch
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+.env
+.DS_Store
+*.png
+*.csv
+!lebron_pbp_usg_components.csv
+!lebron_career_fatigue_results.csv
+!lebron_tpi_results.csv
+!lebron_reg_season_game_dates.csv
+!lebron_tpi_metrics_final.csv
+!lebron_teammate_injury_data.csv
+!lebron_opponent_injury_data.csv
+!lebron_team_srs_data.csv
+!lebron_opponent_srs_data.csv

@@ -1,64 +1,119 @@
 # True Playoff Impact (TPI) Model
 
 ## Overview
-True Playoff Impact (TPI) is an advanced, era-adjusted metric designed to rigorously quantify a player's true individual impact and "carry jobs" during the NBA Playoffs. Moving beyond traditional box score stats, TPI evaluates a player's performance contextually by incorporating efficiency, opponent strength, team capability, injury context, and cumulative physical fatigue.
+
+True Playoff Impact (TPI) is an advanced, era-adjusted metric designed to rigorously quantify a player's true individual impact during the NBA Playoffs. Moving beyond traditional box score stats, TPI evaluates performance contextually by incorporating efficiency, opponent strength, team capability, injury context, and a physiologically rigorous biological fatigue simulation.
 
 The fundamental equation is:
-**`Total TPI = (Production Score × Resistance Score × Average Fatigue) × Games Played`**
+
+> **`Total TPI = (Production Score × Resistance Score × Production Multiplier) × Games Played`**
+
+Where `Production Multiplier` is the output of a 6-state biological ODE system that simulates the real cumulative metabolic cost of a playoff run, computed from exact play-by-play data.
 
 ---
 
-## The Core Components
+## The Three Core Components
 
-### 1. Production Score
-The Production Score (`Prod_Score`) evaluates a player's on-court output, heavily rewarding efficient scoring while relying on Box Plus/Minus (BPM) as the foundational metric.
-*   **Efficiency Adjustment:** A non-linear True Shooting percentage (TS%) multiplier is applied (`^1.5`) to reward high-efficiency scoring relative to the era's league average.
+### 1. Production Score (`Prod_Score`)
 
-### 2. Resistance Score
-The Resistance Score (`Res_Score`) quantifies the difficulty of the playoff environment. It compares the "Final Boss" weighted strength of the opponents against the strength of the player's own supporting cast.
-*   **Team Capability (SRS):** A blend of Current Regular Season SRS (44%) and Previous Post-Season SRS (56%), pace-adjusted to 100 possessions.
-*   **"Final Boss" Weighting:** Series are weighted (50%/25%/15%/10%) based on difficulty, ensuring deep runs against elite competition are prioritized.
-*   **Injury Penalties:** Supporting cast and opponent injuries are evaluated on a series-by-series basis using missing-BPM equivalents.
+Evaluates raw on-court output using BPM as the base, adjusted for shooting efficiency relative to the era's league average.
 
-### 3. High-Fidelity Fatigue Engine (3-Scale ODE)
-The TPI Fatigue Engine is a biologically-grounded simulation that models metabolic strain and recovery using exact play-by-play (PBP) substitution patterns.
+- **Base Metric:** Box Plus/Minus (BPM) from Basketball Reference.
+- **Efficiency Multiplier:** A non-linear TS% correction `(ts_player / ts_league)^1.5` is applied.
 
-#### The Triple-Scale Recovery Model:
-*   **Scale 1: Adrenaline-Inhibited Play (`BETA_PLAYING`):** While on-court, systemic recovery is inhibited by high catecholamine levels and muscle pressure. Recovery is near-zero, ensuring fatigue strictly accumulates during play.
-*   **Scale 2: Metabolic Clearing (`BETA_TIMEOUT`):** During timeouts and bench intervals, the body rapidly clears lactate and restores Phosphocreatine (PCr) on a **minutes-scale**.
-*   **Scale 3: Systemic Remodeling (`BETA_REST_DAY`):** Between games, the body performs tissue repair, neural restoration, and glycogen replenishment on a **days-scale**.
+### 2. Resistance Score (`Res_Score`)
 
-#### Temporal Accuracy:
-*   **Actual-Date Integration:** The model uses the exact historical calendar dates for both the Regular Season and Postseason, correctly capturing the erratic rest intervals (back-to-backs, travel days) that drive cumulative wear-and-tear.
+Quantifies the difficulty of the playoff environment by measuring the gap between opponent quality and teammate support.
+
+- **Team Capability (SRS-based):** Blends Current Regular Season SRS (44.4%) with Previous Postseason SRS (55.6%).
+- **"Final Boss" Series Weighting:** Series are weighted 50% / 25% / 15% / 10% (hardest to easiest) to prioritize elite opponents.
+- **Injury Context:** Missing-BPM penalties are applied for both teammate and opponent injuries.
+- **Resistance Formula:** `gap = adj_opp_srs - adj_help_srs`. Resistance is calculated as `(gap+1)^0.35` for positive gaps.
+
+### 3. Bio-Fatigue Engine: 6-State ODE System (`Production Multiplier`)
+
+The TPI Fatigue Engine is a biologically-grounded differential equation system that models six distinct physiological state variables.
+
+#### The Six State Variables
+
+| Variable | Biological Meaning | Range |
+| :--- | :--- | :--- |
+| **PCr** | Phosphocreatine (Fast-resynthesis capacity) | 0–1 |
+| **Gly** | Glycogen stores (Aerobic fuel reserve) | 0–1 |
+| **Lac** | Lactate clearance (Normalized efficiency) | 0–1 |
+| **M** | Muscle integrity (Contractile capacity) | 0–1 |
+| **CNS** | Central Nervous System readiness | 0–1 |
+| **Phi (Φ)** | EPOC debt accumulator | 0–∞ |
+
+#### The Production Multiplier (P)
+
+The output scalar `P` combines all metrics:
+```
+P = PCr^0.5 × Lac^0.4 × Gly^0.3 × M^0.4 × CNS^0.8
+```
+
+#### Centralized Model (`bio_model.py`)
+
+The model is centralized in a shared module to ensure consistency across all simulations and visualizations. It includes:
+- **Active Play**: Intensity is calculated as `(Movement * 0.5) + (Contact * 0.5)`.
+- **Bench/Timeout Rest**: Rapid partial recovery.
+- **Inter-Game Recovery**: Long-term metabolic and neural repair using consistent minute-based integration.
 
 ---
 
-## Visualization Suite: The Snake Zoom
-To represent the vast difference between 40 minutes of high-intensity play and 3 days of rest, TPI uses a **"Snake Zoom"** visualization architecture.
+## Data Pipeline
 
-*   **Non-Linear Time Magnification:** Game segments are magnified by **30x** on the X-axis while rest days remain at 1x. This allows metabolic "zig-zags" (exertion vs. timeout recovery) to be visible alongside long-term decay.
-*   **5-Level Fidelity:**
-    *   **Level 1 (Intra-Game):** 1-minute resolution ODE view of single games.
-    *   **Level 2 (Series):** Snake-zoomed view of a single series.
-    *   **Level 3 (Postseason):** Snake-zoomed view of the full playoff run.
-    *   **Level 4 (Regular Season):** High-level view of the 82-game campaign using actual dates.
-    *   **Level 5 (Overall Season):** A 15x-magnified bridge showing the transition from regular season baseline to playoff apex.
+1. **PBP Reconstruction** (`data_reconstruction.py`): Downloads and parses raw PBP data to extract usage and intensity components.
+2. **Fatigue Engine** (`fatigue_engine.py`): Runs the full bio-ODE simulation from Regular Season through Postseason.
+3. **TPI Main** (`tpi_main.py`): Combines Production, Resistance, and Fatigue into the final TPI scores.
+4. **Visualization** (`visualization.py`): Generates high-fidelity 5-panel charts of the fatigue dynamics.
 
 ---
 
-## Career Benchmarks (LeBron James 2006-2025)
+## Visualization Suite: The Multi-Scale Fatigue View
 
-The TPI model identifies the 2018 run as the statistically greatest "carry job" in NBA history.
+The TPI visualization engine produces a 5-panel dashboard analyzing fatigue at every level of resolution:
 
-| Year | Total TPI | TPI per G | Fatigue_Avg | Historical Context |
-| :--- | :--- | :--- | :--- | :--- |
-| **2018** | **280.5** | **12.75** | **0.603** | **The Apex Carry Job** |
-| **2016** | 211.9 | 10.09 | 0.483 | 3-1 Comeback / Peak Efficiency |
-| **2015** | 189.6 | 9.48 | 0.633 | Maximum Physical Exertion |
+- **Graph 1: Intra-Game Dynamics**: Minute-by-minute metabolic shifts within a single game (e.g., 2018 Finals G1).
+- **Graph 2: Recovery Windows**: Hourly recovery curves between sequential games.
+- **Graph 3: Series Progression**: Game-to-game fatigue trends within a specific series.
+- **Graph 4: Playoff Gauntlet**: Series-by-series trends across the entire postseason, emphasizing the cumulative cost of deep runs.
+- **Graph 5: Seasonal Trends**: The full journey from Regular Season quintiles to the Postseason peak.
+
+---
+
+## Career Results (LeBron James 2006–2025)
+
+| Year | Total TPI | TPI per G | Prod_Score | Res_Score | Prod_Multiplier | GP |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **2016** | **154.28** | 7.35 | 14.85 | 1.431 | 0.346 | 21 |
+| **2018** | 116.13 | 5.28 | 15.08 | 1.674 | 0.209 | 22 |
+| **2014** | 115.15 | 6.06 | 15.77 | 1.112 | 0.345 | 19 |
+| **2017** | 90.94 | 5.35 | 14.70 | 1.235 | 0.295 | 17 |
+| **2012** | 85.12 | 3.70 | 12.71 | 0.842 | 0.346 | 23 |
+| **2023** | 70.73 | 4.16 | 6.65 | 1.540 | 0.406 | 17 |
+| **2013** | 69.17 | 3.01 | 10.90 | 0.757 | 0.364 | 23 |
+| **2015** | 68.32 | 3.42 | 8.92 | 1.321 | 0.290 | 20 |
+| **2006** | 62.11 | 4.78 | 9.88 | 1.357 | 0.356 | 13 |
+| **2020** | 60.52 | 2.88 | 14.09 | 0.564 | 0.362 | 21 |
 
 ---
 
 ## Technical Architecture
-*   `code/tpi_calculations/tpi_career_fatigue.py`: Core simulation engine (ODE + Temporal logic).
-*   `code/tpi_calculations/plot_tpi.py`: The 5-level high-fidelity visualization suite.
-*   `data/tpi_results/lebron_tpi_results.csv`: Final computed TPI datasets.
+
+```
+true_playoff_impact/
+├── code/
+│   └── tpi_calculations/
+│       ├── bio_model.py                # Centralized bio-ODE logic & constants
+│       ├── pbp_data_reconstruction.py  # PBP downloader & parser
+│       ├── tpi_career_fatigue.py       # Full-career simulation engine
+│       ├── tpi_v2.py                   # Final TPI assembly
+│       └── plot_tpi.py                 # Multi-panel visualization suite
+├── data/
+│   ├── fatigue_metric/                 # Simulation inputs and intermediate outputs
+│   ├── prod_score/                     # Player efficiency and BPM data
+│   ├── res_score/                      # Team/Opponent SRS and Injury data
+│   └── tpi_results/                    # Final CSV results and PNG graphs
+└── README.md
+```

@@ -13,10 +13,13 @@ def download_and_extract(year):
     
     if not os.path.exists(csv_filename):
         try:
-            subprocess.run(["curl.exe", "-L", url, "-o", filename], check=True)
+            subprocess.run(["curl.exe", "-f", "-L", url, "-o", filename], check=True)
             subprocess.run(["tar.exe", "-xf", filename], check=True)
-            os.remove(filename)
+            if os.path.exists(filename):
+                os.remove(filename)
         except Exception as e:
+            if os.path.exists(filename):
+                os.remove(filename)
             return None
     return csv_filename
 
@@ -47,6 +50,13 @@ def process_year_pbp(csv_file, year):
             l_fta = len(p_df[(p_df['PLAYER1_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 3)])
             l_tov = len(p_df[(p_df['PLAYER1_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 5)])
             
+            l_ast = len(p_df[(p_df['PLAYER2_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 1)])
+            l_trb = len(p_df[(p_df['PLAYER1_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 4)])
+            l_stl = len(p_df[(p_df['PLAYER2_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 5)])
+            l_blk = len(p_df[(p_df['PLAYER3_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 2)])
+            l_pf = len(p_df[(p_df['PLAYER1_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 6)])
+            l_fd = len(p_df[(p_df['PLAYER3_ID'] == LEBRON_ID) & (p_df['EVENTMSGTYPE'] == 6)])
+            
             t_fga = len(p_df[(p_df['PLAYER1_TEAM_ID'] == team_id) & (p_df['EVENTMSGTYPE'].isin([1, 2]))])
             t_fta = len(p_df[(p_df['PLAYER1_TEAM_ID'] == team_id) & (p_df['EVENTMSGTYPE'] == 3)])
             t_tov = len(p_df[(p_df['PLAYER1_TEAM_ID'] == team_id) & (p_df['EVENTMSGTYPE'] == 5)])
@@ -56,10 +66,12 @@ def process_year_pbp(csv_file, year):
             timeouts_elapsed = [q_length - t for t in timeouts]
             
             results.append({
-                'Year': year + 1,
+                'Year': year + 1, # Dataset year (e.g. 2005) is the start-of-season; TPI uses the end-of-season year (e.g. 2006)
                 'Game_ID': game_id,
                 'Period': period,
                 'L_FGA': l_fga, 'L_FTA': l_fta, 'L_TOV': l_tov,
+                'L_AST': l_ast, 'L_TRB': l_trb, 'L_STL': l_stl,
+                'L_BLK': l_blk, 'L_PF': l_pf, 'L_FD': l_fd,
                 'T_FGA': t_fga, 'T_FTA': t_fta, 'T_TOV': t_tov,
                 'Timeouts': ",".join(map(str, timeouts_elapsed))
             })
@@ -68,7 +80,7 @@ def process_year_pbp(csv_file, year):
 def main():
     years = list(range(2005, 2025))
     all_results = []
-    output_csv = "data/fatigue_metric/lebron_pbp_usg_components.csv"
+    output_csv = "data/processed/lebron_pbp_usg_components.csv"
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     
     for year in years:
