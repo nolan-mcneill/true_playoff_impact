@@ -1,3 +1,6 @@
+.agents
+antigravity.exe
+*.exe
 __pycache__/
 *.py[cod]
 *$py.class
